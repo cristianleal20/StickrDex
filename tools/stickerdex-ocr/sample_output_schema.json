@@ -1,0 +1,25 @@
+{
+  "detected_missing_by_image": [
+    {
+      "image": "Archivo_escaneado_20260503-1729-06.jpg",
+      "raw_text": "RSA 3",
+      "sticker_id": "RSA-3",
+      "prefix": "RSA",
+      "number": 3,
+      "confidence": 0.92,
+      "source": "easyocr"
+    }
+  ],
+  "summary": {
+    "total_images": 92,
+    "total_detected_missing_codes": 123,
+    "unique_missing_codes": ["RSA-3", "PAR-10"]
+  },
+  "inventory_import": [
+    {
+      "stickerId": "RSA-3",
+      "quantity": 0,
+      "updatedAt": 1777899600000
+    }
+  ]
+}
