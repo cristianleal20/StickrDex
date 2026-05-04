@@ -1,51 +1,54 @@
 import { useState, useRef } from 'react'
-import { Camera, Loader2 } from 'lucide-react'
-import { db } from '../db'
+import { Camera, Loader2, CheckCircle2 } from 'lucide-react'
+import { incrementSticker, normalizeStickerIdsFromText } from '../db'
 
 export function Scanner() {
   const [status, setStatus] = useState<'idle' | 'scanning' | 'done' | 'error'>('idle')
   const [message, setMessage] = useState('')
+  const [detectedCodes, setDetectedCodes] = useState<string[]>([])
   const inputRef = useRef<HTMLInputElement>(null)
 
   const handleFile = async (file: File) => {
     setStatus('scanning')
-    setMessage('Procesando imagen...')
+    setDetectedCodes([])
+    setMessage('Procesando imagen con OCR...')
+
     try {
       const { createWorker } = await import('tesseract.js')
-      const worker = await createWorker('spa')
+      const worker = await createWorker('eng')
       const { data: { text } } = await worker.recognize(file)
       await worker.terminate()
 
-      const numbers = [...text.matchAll(/\b(\d{1,4})\b/g)].map(m => parseInt(m[1]))
-      const unique = [...new Set(numbers)].filter(n => n >= 1 && n <= 670)
+      const codes = normalizeStickerIdsFromText(text)
 
-      if (unique.length === 0) {
+      if (codes.length === 0) {
         setStatus('error')
-        setMessage('No se detectaron números de figuritas.')
+        setMessage('No se detectaron códigos tipo ARG 17, RSA 3 o MEX 12. Intenta con más luz y acercando la cámara al hueco.')
         return
       }
 
-      for (const n of unique) {
-        const exists = await db.stickers.where('number').equals(n).first()
-        if (!exists) {
-          await db.stickers.add({ number: n, owned: true, createdAt: new Date() })
-        } else {
-          await db.stickers.where('number').equals(n).modify({ owned: true })
-        }
+      for (const code of codes) {
+        await incrementSticker(code, 1)
       }
 
+      setDetectedCodes(codes)
       setStatus('done')
-      setMessage(`✅ ${unique.length} figurita(s) detectada(s): ${unique.slice(0, 10).join(', ')}${unique.length > 10 ? '...' : ''}`)
-    } catch {
+      setMessage(`✅ ${codes.length} cromo(s) agregado(s): ${codes.join(', ')}`)
+    } catch (error) {
+      console.error(error)
       setStatus('error')
-      setMessage('Error al procesar la imagen.')
+      setMessage('Error al procesar la imagen. Revisa que el navegador permita cargar OCR o intenta con otra foto.')
     }
   }
 
   return (
     <div className="p-4 space-y-6">
-      <h2 className="text-xl font-bold">Escanear figuritas</h2>
-      <p className="text-sm text-gray-500">Fotografía tus figuritas y detectaremos los números automáticamente.</p>
+      <div>
+        <h2 className="text-xl font-bold">Escanear cromos</h2>
+        <p className="text-sm text-gray-500 mt-1">
+          Sube una foto de un cromo o de un hueco visible. El OCR buscará códigos como <b>RSA 3</b>, <b>PAR 10</b> o <b>MEX 13</b>.
+        </p>
+      </div>
 
       <button
         onClick={() => inputRef.current?.click()}
@@ -73,6 +76,22 @@ export function Scanner() {
       {message && (
         <div className={`rounded-xl p-4 text-sm ${status === 'error' ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'}`}>
           {message}
+        </div>
+      )}
+
+      {detectedCodes.length > 0 && (
+        <div className="bg-gray-50 rounded-2xl p-4 space-y-3">
+          <div className="flex items-center gap-2 text-sm font-semibold text-gray-700">
+            <CheckCircle2 size={18} className="text-green-600" />
+            Detectados
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {detectedCodes.map(code => (
+              <span key={code} className="px-3 py-1 rounded-full bg-white border text-sm font-medium text-gray-700">
+                {code.replace('-', ' ')}
+              </span>
+            ))}
+          </div>
         </div>
       )}
     </div>
