@@ -16,6 +16,12 @@ export interface InventoryItem {
   updatedAt: number
 }
 
+export interface StickerWithQuantity extends Sticker {
+  quantity: number
+  owned: boolean
+  duplicateCount: number
+}
+
 const TEAMS: Array<[string, string]> = [
   ['MEX','Mexico'], ['RSA','South Africa'], ['KOR','South Korea'], ['CZE','Czech Republic'],
   ['CAN','Canada'], ['BIH','Bosnia & Herz.'], ['QAT','Qatar'], ['SUI','Switzerland'],
@@ -95,4 +101,65 @@ export function normalizeStickerId(input: string) {
   if (prefix === 'FWC') return number >= 0 && number <= 19 ? `FWC-${number}` : null
   if (prefix === 'CC') return number >= 1 && number <= 12 ? `CC-${number}` : null
   return TEAMS.some(([code]) => code === prefix) && number >= 1 && number <= 20 ? `${prefix}-${number}` : null
+}
+
+export function normalizeStickerIdsFromText(text: string) {
+  const normalizedText = text
+    .toUpperCase()
+    .replace(/[-_]/g, ' ')
+    .replace(/[^A-Z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+
+  const candidates = [...normalizedText.matchAll(/\b([A-Z]{2,3})\s*(\d{1,2})\b/g)]
+    .map(match => normalizeStickerId(`${match[1]}-${match[2]}`))
+    .filter(Boolean) as string[]
+
+  return [...new Set(candidates)]
+}
+
+export async function getInventoryMap() {
+  const inventory = await db.inventory.toArray()
+  return new Map(inventory.map(item => [item.stickerId, item.quantity]))
+}
+
+export async function getCollection() {
+  const inventoryMap = await getInventoryMap()
+  return CHECKLIST.map(sticker => {
+    const quantity = inventoryMap.get(sticker.id) ?? 0
+    return {
+      ...sticker,
+      quantity,
+      owned: quantity > 0,
+      duplicateCount: Math.max(0, quantity - 1)
+    }
+  })
+}
+
+export async function setStickerQuantity(stickerId: string, quantity: number) {
+  const normalizedId = normalizeStickerId(stickerId) ?? stickerId
+  const safeQuantity = Math.max(0, Math.floor(quantity))
+  await db.inventory.put({
+    stickerId: normalizedId,
+    quantity: safeQuantity,
+    updatedAt: Date.now()
+  })
+}
+
+export async function incrementSticker(stickerId: string, amount = 1) {
+  const normalizedId = normalizeStickerId(stickerId) ?? stickerId
+  const current = await db.inventory.get(normalizedId)
+  await setStickerQuantity(normalizedId, (current?.quantity ?? 0) + amount)
+}
+
+export async function importInventory(items: InventoryItem[]) {
+  const validItems = items
+    .map(item => ({
+      stickerId: normalizeStickerId(item.stickerId) ?? item.stickerId,
+      quantity: Math.max(0, Math.floor(Number(item.quantity) || 0)),
+      updatedAt: item.updatedAt || Date.now()
+    }))
+    .filter(item => Boolean(getStickerById(item.stickerId)))
+
+  await db.inventory.bulkPut(validItems)
+  return validItems.length
 }
