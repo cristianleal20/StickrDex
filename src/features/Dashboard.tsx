@@ -1,11 +1,13 @@
 import { useLiveQuery } from 'dexie-react-hooks'
-import { db } from '../db'
+import { db, getCollection } from '../db'
 
 export function Dashboard() {
-  const stickers = useLiveQuery(() => db.stickers.toArray(), [])
-  const owned = stickers?.filter(s => s.owned).length ?? 0
-  const total = stickers?.length ?? 0
-  const pct = total > 0 ? Math.round((owned / total) * 100) : 0
+  const collection = useLiveQuery(() => getCollection(), [db.inventory])
+  const owned = collection?.filter(s => s.owned).length ?? 0
+  const duplicates = collection?.reduce((sum, s) => sum + s.duplicateCount, 0) ?? 0
+  const total = collection?.filter(s => s.section !== 'promo').length ?? 980
+  const ownedBase = collection?.filter(s => s.section !== 'promo' && s.owned).length ?? 0
+  const pct = total > 0 ? Math.round((ownedBase / total) * 100) : 0
 
   return (
     <div className="p-4 space-y-6">
@@ -13,7 +15,7 @@ export function Dashboard() {
       <p className="text-gray-500 text-sm">Mundial 2026 · Álbum Panini</p>
 
       <div className="bg-blue-600 rounded-2xl p-6 text-white space-y-2">
-        <p className="text-blue-100 text-sm">Progreso del álbum</p>
+        <p className="text-blue-100 text-sm">Progreso del álbum base</p>
         <div className="flex items-end gap-2">
           <span className="text-5xl font-bold">{pct}%</span>
         </div>
@@ -23,14 +25,14 @@ export function Dashboard() {
             style={{ width: `${pct}%` }}
           />
         </div>
-        <p className="text-blue-100 text-xs">{owned} de {total} figuritas</p>
+        <p className="text-blue-100 text-xs">{ownedBase} de {total} cromos base</p>
       </div>
 
       <div className="grid grid-cols-2 gap-3">
-        <StatCard label="Tengo" value={owned} color="green" />
-        <StatCard label="Faltan" value={total - owned} color="orange" />
-        <StatCard label="Total" value={total} color="blue" />
-        <StatCard label="Completado" value={`${pct}%`} color="purple" />
+        <StatCard label="Tengo" value={ownedBase} color="green" />
+        <StatCard label="Faltan" value={total - ownedBase} color="orange" />
+        <StatCard label="Total base" value={total} color="blue" />
+        <StatCard label="Repetidos" value={duplicates} color="purple" />
       </div>
     </div>
   )
