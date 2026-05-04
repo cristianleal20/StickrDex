@@ -1,12 +1,38 @@
-import { useState } from 'react'
-import { db } from '../db'
+import { useRef, useState } from 'react'
+import { CHECKLIST, db, importInventory, type InventoryItem } from '../db'
 
 export function Settings() {
   const [confirming, setConfirming] = useState(false)
+  const [message, setMessage] = useState('')
+  const inputRef = useRef<HTMLInputElement>(null)
 
   const resetAlbum = async () => {
-    await db.stickers.clear()
+    await db.inventory.clear()
     setConfirming(false)
+    setMessage('Álbum reiniciado.')
+  }
+
+  const exportInventory = async () => {
+    const inventory = await db.inventory.toArray()
+    const blob = new Blob([JSON.stringify(inventory, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = 'stickrdex-inventory.json'
+    link.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const importInventoryFile = async (file: File) => {
+    try {
+      const parsed = JSON.parse(await file.text()) as InventoryItem[]
+      if (!Array.isArray(parsed)) throw new Error('El archivo no contiene una lista JSON.')
+      const imported = await importInventory(parsed)
+      setMessage(`Inventario importado: ${imported} registros válidos.`)
+    } catch (error) {
+      console.error(error)
+      setMessage('No se pudo importar el inventario. Revisa el formato JSON.')
+    }
   }
 
   return (
@@ -17,10 +43,33 @@ export function Settings() {
         <Section title="Acerca de">
           <InfoRow label="App" value="StickrDex" />
           <InfoRow label="Álbum" value="Panini · Mundial 2026" />
-          <InfoRow label="Total figuritas" value="670" />
+          <InfoRow label="Base" value="980 cromos" />
+          <InfoRow label="Con promos" value={`${CHECKLIST.length} registros`} />
         </Section>
 
         <Section title="Datos">
+          <button
+            onClick={exportInventory}
+            className="w-full text-left px-4 py-3 text-blue-600 text-sm font-medium hover:bg-blue-50 rounded-xl transition-colors"
+          >
+            Exportar inventario JSON
+          </button>
+
+          <button
+            onClick={() => inputRef.current?.click()}
+            className="w-full text-left px-4 py-3 text-gray-700 text-sm font-medium hover:bg-gray-100 rounded-xl transition-colors"
+          >
+            Importar inventario JSON del módulo OCR
+          </button>
+
+          <input
+            ref={inputRef}
+            type="file"
+            accept="application/json"
+            className="hidden"
+            onChange={event => event.target.files?.[0] && importInventoryFile(event.target.files[0])}
+          />
+
           {!confirming ? (
             <button
               onClick={() => setConfirming(true)}
@@ -48,7 +97,21 @@ export function Settings() {
             </div>
           )}
         </Section>
+
+        <Section title="OCR local">
+          <div className="px-4 py-3 text-sm text-gray-600 space-y-2">
+            <p>El módulo local vive en:</p>
+            <code className="block bg-white border rounded-xl p-2 text-xs text-gray-700">tools/stickerdex-ocr</code>
+            <p>Corre el script en tu computadora y después importa aquí el archivo <b>inventory_import.json</b>.</p>
+          </div>
+        </Section>
       </div>
+
+      {message && (
+        <div className="rounded-xl p-4 text-sm bg-blue-50 text-blue-700">
+          {message}
+        </div>
+      )}
     </div>
   )
 }
