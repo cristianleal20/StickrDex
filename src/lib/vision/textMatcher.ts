@@ -40,7 +40,7 @@ export function matchByText(
       return {
         sticker: ref,
         score,
-        confidenceLabel: score > 0.85 ? 'high' : score > 0.65 ? 'medium' : 'low',
+        confidenceLabel: (score > 0.85 ? 'high' : score > 0.65 ? 'medium' : 'low') as 'high' | 'medium' | 'low',
         matchedBy: [
           ...(textScore > 0 ? ['text' as const] : []),
           ...(codeScore > 0 ? ['code' as const] : [])

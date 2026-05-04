@@ -34,44 +34,14 @@ OCR_CORRECTIONS = {
 }
 
 PREFIX_ALIASES = {
-    'MFX': 'MEX',
-    'MEXI': 'MEX',
-    'RSAI': 'RSA',
-    'K0R': 'KOR',
-    'K0RE': 'KOR',
-    'C2E': 'CZE',
-    'CZF': 'CZE',
-    'CANADA': 'CAN',
-    'OAT': 'QAT',
-    'QAI': 'QAT',
-    'SUII': 'SUI',
-    'BR4': 'BRA',
-    '8RA': 'BRA',
-    'M4R': 'MAR',
-    'US4': 'USA',
-    'PARA': 'PAR',
-    '6ER': 'GER',
-    'CUN': 'CUW',
-    'NFD': 'NED',
-    'JPNN': 'JPN',
-    'TUNN': 'TUN',
-    'EGV': 'EGY',
-    'N2L': 'NZL',
-    'K5A': 'KSA',
-    'URV': 'URU',
-    'FR4': 'FRA',
-    'SFW': 'SEN',
-    'N0R': 'NOR',
-    'AR6': 'ARG',
-    'AL6': 'ALG',
-    'A1G': 'ALG',
-    'AUI': 'AUT',
-    'J0R': 'JOR',
-    'P0R': 'POR',
-    'C0D': 'COD',
-    'U2B': 'UZB',
-    'C0L': 'COL',
-    'CR0': 'CRO',
+    'MFX': 'MEX', 'MEXI': 'MEX', 'RSAI': 'RSA', 'K0R': 'KOR', 'K0RE': 'KOR',
+    'C2E': 'CZE', 'CZF': 'CZE', 'CANADA': 'CAN', 'OAT': 'QAT', 'QAI': 'QAT',
+    'SUII': 'SUI', 'BR4': 'BRA', '8RA': 'BRA', 'M4R': 'MAR', 'US4': 'USA',
+    'PARA': 'PAR', '6ER': 'GER', 'CUN': 'CUW', 'NFD': 'NED', 'JPNN': 'JPN',
+    'TUNN': 'TUN', 'EGV': 'EGY', 'N2L': 'NZL', 'K5A': 'KSA', 'URV': 'URU',
+    'FR4': 'FRA', 'SFW': 'SEN', 'N0R': 'NOR', 'AR6': 'ARG', 'AL6': 'ALG',
+    'A1G': 'ALG', 'AUI': 'AUT', 'J0R': 'JOR', 'P0R': 'POR', 'C0D': 'COD',
+    'U2B': 'UZB', 'C0L': 'COL', 'CR0': 'CRO',
 }
 
 
@@ -117,7 +87,7 @@ def extract_codes_from_text(text: str, include_promo: bool = True) -> List[str]:
     text = re.sub(r'\s+', ' ', text).strip()
 
     candidates: List[str] = []
-    # Strict pattern: ABC 12
+    # Strict pattern: ABC 12 or ABC12
     for prefix, number in re.findall(r'\b([A-Z0-9]{2,6})\s*(\d{1,2})\b', text):
         code = normalize_code(prefix, number, include_promo=include_promo)
         if code:
@@ -138,8 +108,7 @@ def extract_codes_from_text(text: str, include_promo: bool = True) -> List[str]:
 def preprocess_for_ocr(image: Any) -> List[Any]:
     import cv2
 
-    variants = []
-    variants.append(image)
+    variants = [image]
     scale = 1.6
     resized = cv2.resize(image, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
     variants.append(resized)
@@ -208,18 +177,28 @@ def ocr_image(image_path: Path, engine: str) -> List[Tuple[str, float, str]]:
     if engine == 'tesseract':
         return run_tesseract(variants)
 
-    # auto
+    # auto: try easyocr, fall back to tesseract
     try:
         return run_easyocr(variants)
     except Exception:
         return run_tesseract(variants)
 
 
-def analyze_image(image_path: Path, engine: str, min_confidence: float, include_promo: bool) -> List[Dict[str, Any]]:
+def analyze_image(
+    image_path: Path,
+    engine: str,
+    min_confidence: float,
+    include_promo: bool,
+    debug: bool,
+    debug_dir: Optional[Path],
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Returns (detected_rows, raw_ocr_rows)."""
     raw_ocr = ocr_image(image_path, engine)
+    raw_rows: List[Dict[str, Any]] = []
     detected: Dict[str, Dict[str, Any]] = {}
 
     for raw_text, confidence, source in raw_ocr:
+        raw_rows.append({'image': image_path.name, 'text': raw_text, 'confidence': round(confidence, 4), 'source': source})
         if confidence < min_confidence:
             continue
         for code in extract_codes_from_text(raw_text, include_promo=include_promo):
@@ -236,19 +215,36 @@ def analyze_image(image_path: Path, engine: str, min_confidence: float, include_
                     'source': source,
                 }
 
-    return sorted(detected.values(), key=lambda row: (row['prefix'], row['number']))
+    # Debug: annotate image if possible
+    if debug and debug_dir is not None and detected:
+        try:
+            import cv2
+            img = cv2.imread(str(image_path))
+            if img is not None:
+                label = ' | '.join(sorted(detected.keys()))
+                cv2.putText(img, label, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 200, 0), 2)
+                debug_dir.mkdir(parents=True, exist_ok=True)
+                cv2.imwrite(str(debug_dir / image_path.name), img)
+        except Exception as exc:
+            print(f'  [debug] Could not annotate {image_path.name}: {exc}')
+
+    rows = sorted(detected.values(), key=lambda row: (row['prefix'], row['number']))
+    return rows, raw_rows
 
 
-def write_csv(path: Path, rows: List[Dict[str, Any]]) -> None:
+def write_csv(path: Path, rows: List[Dict[str, Any]], fieldnames: List[str]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    fields = ['image', 'raw_text', 'sticker_id', 'prefix', 'number', 'confidence', 'source']
     with path.open('w', newline='', encoding='utf-8') as f:
-        writer = csv.DictWriter(f, fieldnames=fields)
+        writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction='ignore')
         writer.writeheader()
         writer.writerows(rows)
 
 
-def build_inventory_import(missing_codes: Set[str], include_promo: bool, mark_all_others_owned: bool) -> List[Dict[str, Any]]:
+def build_inventory_import(
+    missing_codes: Set[str],
+    include_promo: bool,
+    mark_all_others_owned: bool,
+) -> List[Dict[str, Any]]:
     now = int(time.time() * 1000)
     checklist = make_checklist(include_promo=include_promo)
     inventory = []
@@ -262,58 +258,95 @@ def build_inventory_import(missing_codes: Set[str], include_promo: bool, mark_al
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description='Detect visible missing sticker codes from scanned StickrDex album pages.')
-    parser.add_argument('--images_dir', type=Path, required=True)
-    parser.add_argument('--output_json', type=Path, default=Path('outputs/detected_missing_by_image.json'))
-    parser.add_argument('--output_csv', type=Path, default=Path('outputs/detected_missing_by_image.csv'))
-    parser.add_argument('--inventory_json', type=Path, default=Path('outputs/inventory_import.json'))
+    parser = argparse.ArgumentParser(
+        description='Detect visible sticker codes from scanned StickrDex album pages.'
+    )
+    parser.add_argument('--images_dir', type=Path, required=True, help='Directory with scanned album images.')
+    parser.add_argument('--output_dir', type=Path, default=Path('outputs'), help='Root output directory.')
     parser.add_argument('--engine', choices=['auto', 'easyocr', 'tesseract'], default='auto')
     parser.add_argument('--min_confidence', type=float, default=0.35)
-    parser.add_argument('--include_promo', action='store_true')
-    parser.add_argument('--mark_all_others_owned', action='store_true')
+    parser.add_argument('--include_promo', action='store_true', help='Include Coca-Cola promo stickers.')
+    parser.add_argument('--mark_all_others_owned', action='store_true',
+                        help='In inventory_import.json, mark every sticker NOT in missing list as owned (qty=1).')
+    parser.add_argument('--debug', action='store_true',
+                        help='Save annotated debug images and raw OCR JSON per image.')
     args = parser.parse_args()
 
     if not args.images_dir.exists():
         raise SystemExit(f'Images dir does not exist: {args.images_dir}')
 
+    output_dir: Path = args.output_dir
+    output_dir.mkdir(parents=True, exist_ok=True)
+    debug_dir = output_dir / 'debug' if args.debug else None
+
     image_files = sorted([p for p in args.images_dir.iterdir() if p.suffix.lower() in IMAGE_EXTENSIONS])
-    all_rows: List[Dict[str, Any]] = []
+
+    all_detected_rows: List[Dict[str, Any]] = []
+    all_raw_rows: List[Dict[str, Any]] = []
     by_image: Dict[str, List[Dict[str, Any]]] = {}
+    raw_by_image: Dict[str, List[Dict[str, Any]]] = {}
 
     print(f'Processing {len(image_files)} images...')
     for image_path in image_files:
-        print(f'→ {image_path.name}')
-        rows = analyze_image(image_path, args.engine, args.min_confidence, include_promo=args.include_promo)
-        by_image[image_path.name] = rows
-        all_rows.extend(rows)
+        print(f'  → {image_path.name}')
+        detected_rows, raw_rows = analyze_image(
+            image_path, args.engine, args.min_confidence,
+            include_promo=args.include_promo, debug=args.debug, debug_dir=debug_dir
+        )
+        by_image[image_path.name] = detected_rows
+        raw_by_image[image_path.name] = raw_rows
+        all_detected_rows.extend(detected_rows)
+        all_raw_rows.extend(raw_rows)
+        if detected_rows:
+            codes_str = ', '.join(r['sticker_id'] for r in detected_rows)
+            print(f'    Found: {codes_str}')
 
-    unique_missing = sorted({row['sticker_id'] for row in all_rows})
+    unique_missing = sorted({row['sticker_id'] for row in all_detected_rows})
+
+    # ----- detected_missing_by_image.json -----
     result = {
         'summary': {
             'total_images': len(image_files),
-            'total_detected_rows': len(all_rows),
-            'total_unique_missing_codes': len(unique_missing),
-            'unique_missing_codes': unique_missing,
+            'total_detected_rows': len(all_detected_rows),
+            'total_unique_codes': len(unique_missing),
+            'unique_codes': unique_missing,
             'engine': args.engine,
             'min_confidence': args.min_confidence,
         },
         'by_image': by_image,
     }
+    detected_json = output_dir / 'detected_missing_by_image.json'
+    detected_json.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding='utf-8')
 
-    args.output_json.parent.mkdir(parents=True, exist_ok=True)
-    args.output_json.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding='utf-8')
-    write_csv(args.output_csv, all_rows)
+    # ----- detected_missing_by_image.csv -----
+    detected_csv = output_dir / 'detected_missing_by_image.csv'
+    write_csv(detected_csv, all_detected_rows,
+              ['image', 'raw_text', 'sticker_id', 'prefix', 'number', 'confidence', 'source'])
 
-    inventory = build_inventory_import(set(unique_missing), include_promo=args.include_promo, mark_all_others_owned=args.mark_all_others_owned)
-    args.inventory_json.parent.mkdir(parents=True, exist_ok=True)
-    args.inventory_json.write_text(json.dumps(inventory, ensure_ascii=False, indent=2), encoding='utf-8')
+    # ----- raw_ocr_by_image.json (only when --debug) -----
+    if args.debug:
+        raw_json = output_dir / 'raw_ocr_by_image.json'
+        raw_json.write_text(json.dumps(raw_by_image, ensure_ascii=False, indent=2), encoding='utf-8')
+        print(f'\nDebug raw OCR: {raw_json}')
+        if debug_dir:
+            print(f'Debug images:  {debug_dir}/')
 
-    print('\nDone.')
-    print(f'JSON: {args.output_json}')
-    print(f'CSV: {args.output_csv}')
-    print(f'Inventory import: {args.inventory_json}')
-    print('\nUnique detected missing codes:')
-    print(', '.join(unique_missing) if unique_missing else 'None')
+    # ----- inventory_import.json -----
+    inventory = build_inventory_import(
+        set(unique_missing),
+        include_promo=args.include_promo,
+        mark_all_others_owned=args.mark_all_others_owned,
+    )
+    inventory_json = output_dir / 'inventory_import.json'
+    inventory_json.write_text(json.dumps(inventory, ensure_ascii=False, indent=2), encoding='utf-8')
+
+    print('\n' + '=' * 50)
+    print('DONE')
+    print(f'  Detected JSON:    {detected_json}')
+    print(f'  Detected CSV:     {detected_csv}')
+    print(f'  Inventory import: {inventory_json}')
+    print(f'\n  Unique codes detected ({len(unique_missing)}):')
+    print('  ' + ', '.join(unique_missing) if unique_missing else '  (none)')
 
 
 if __name__ == '__main__':

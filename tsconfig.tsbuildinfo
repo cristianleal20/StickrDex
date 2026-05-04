@@ -1,0 +1,1 @@
+{"root":["./src/app.tsx","./src/db.ts","./src/main.tsx","./src/vite-env.d.ts","./src/components/bottomnav.tsx","./src/features/album.tsx","./src/features/dashboard.tsx","./src/features/scanner.tsx","./src/features/settings.tsx","./src/features/trades.tsx","./src/lib/vision/matcher.ts","./src/lib/vision/textmatcher.ts","./src/lib/vision/types.ts"],"version":"6.0.3"}

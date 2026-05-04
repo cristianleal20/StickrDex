@@ -22,7 +22,7 @@ export interface StickerWithQuantity extends Sticker {
   duplicateCount: number
 }
 
-const TEAMS: Array<[string, string]> = [
+export const TEAMS: Array<[string, string]> = [
   ['MEX','Mexico'], ['RSA','South Africa'], ['KOR','South Korea'], ['CZE','Czech Republic'],
   ['CAN','Canada'], ['BIH','Bosnia & Herz.'], ['QAT','Qatar'], ['SUI','Switzerland'],
   ['BRA','Brazil'], ['MAR','Morocco'], ['HAI','Haiti'], ['SCO','Scotland'],
@@ -37,6 +37,7 @@ const TEAMS: Array<[string, string]> = [
   ['ENG','England'], ['CRO','Croatia'], ['GHA','Ghana'], ['PAN','Panama']
 ]
 
+// Base: FWC(20) + 48 teams × 20 = 980. Promos: CC-1..CC-12 = 12. Total = 992
 export const CHECKLIST: Sticker[] = [
   ...Array.from({ length: 20 }, (_, i) => ({
     id: `FWC-${i}`,
@@ -75,6 +76,10 @@ export const CHECKLIST: Sticker[] = [
   })
 ]
 
+// Sanity exports for verification
+export const CHECKLIST_BASE_COUNT = CHECKLIST.filter(s => s.section !== 'promo').length   // 980
+export const CHECKLIST_TOTAL_COUNT = CHECKLIST.length                                       // 992
+
 class DB extends Dexie {
   inventory!: Dexie.Table<InventoryItem, string>
 
@@ -92,29 +97,46 @@ export function getStickerById(id: string) {
   return CHECKLIST.find(sticker => sticker.id === id)
 }
 
-export function normalizeStickerId(input: string) {
-  const cleaned = input.trim().toUpperCase().replace(/\s+/g, '')
-  const match = cleaned.match(/^([A-Z]{2,3})[-_ ]?(\d{1,2})$/)
+// Normalize a single code string like "RSA3", "RSA 3", "RSA-3", "rsa_3", "FWC0", "FWC 00", "CC1", "CC 1"
+export function normalizeStickerId(input: string): string | null {
+  // Step 1: uppercase and replace separators with a space
+  const cleaned = input.trim().toUpperCase().replace(/[-_]/g, ' ').replace(/\s+/g, ' ')
+
+  // Step 2: try "PREFIX NUM" (with or without space)
+  // Handles: "ARG 17", "ARG17", "ARG-17" (already handled above)
+  const match = cleaned.match(/^([A-Z]{2,3})\s?(\d{1,2})$/)
   if (!match) return null
-  const [, prefix, rawNumber] = match
-  const number = Number(rawNumber)
+
+  const prefix = match[1]
+  const number = Number(match[2])
+
   if (prefix === 'FWC') return number >= 0 && number <= 19 ? `FWC-${number}` : null
   if (prefix === 'CC') return number >= 1 && number <= 12 ? `CC-${number}` : null
-  return TEAMS.some(([code]) => code === prefix) && number >= 1 && number <= 20 ? `${prefix}-${number}` : null
+  return TEAMS.some(([code]) => code === prefix) && number >= 1 && number <= 20
+    ? `${prefix}-${number}`
+    : null
 }
 
-export function normalizeStickerIdsFromText(text: string) {
-  const normalizedText = text
+// Extract all valid sticker IDs from a block of OCR text.
+// Strict enough to avoid false positives from random numbers.
+export function normalizeStickerIdsFromText(text: string): string[] {
+  const normalized = text
     .toUpperCase()
     .replace(/[-_]/g, ' ')
     .replace(/[^A-Z0-9\s]/g, ' ')
     .replace(/\s+/g, ' ')
+    .trim()
 
-  const candidates = [...normalizedText.matchAll(/\b([A-Z]{2,3})\s*(\d{1,2})\b/g)]
-    .map(match => normalizeStickerId(`${match[1]}-${match[2]}`))
-    .filter(Boolean) as string[]
+  const found = new Set<string>()
 
-  return [...new Set(candidates)]
+  // Pattern 1: letters then digits possibly separated by a single space
+  // e.g. "ARG 17", "ARG17", "MEX 3"
+  for (const m of normalized.matchAll(/\b([A-Z]{2,3})\s?(\d{1,2})\b/g)) {
+    const id = normalizeStickerId(`${m[1]}-${m[2]}`)
+    if (id) found.add(id)
+  }
+
+  return [...found].sort()
 }
 
 export async function getInventoryMap() {
